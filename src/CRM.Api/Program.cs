@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
-using System.Threading.Channels;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,9 +26,9 @@ builder.Logging.AddDailyFileLogger(opts =>
         builder.Configuration["DailyLog:MinLevel"] ?? "Information");
 });
 
-// ── Entity Framework Core (SQLite) ──────────────────────────────────────
+// ── Entity Framework Core (SQL Server) ──────────────────────────────────
 builder.Services.AddDbContext<CrmDbContext>(opts =>
-    opts.UseSqlite(builder.Configuration.GetConnectionString("CrmDb")));
+    opts.UseSqlServer(builder.Configuration.GetConnectionString("CrmDb")));
 
 // ── Repositories (Data Access — seule couche qui touche la BD) ──────────────
 builder.Services.AddScoped<IClientRepository,      ClientRepository>();
@@ -47,17 +47,10 @@ builder.Services.AddScoped<IJitQuotaService>(sp =>
         sp.GetRequiredService<ILogger<JitQuotaService>>(),
         builder.Configuration.GetConnectionString("CrmDb")!));
 
-// ── File de messages (Channels in-memory) ───────────────────────────────────
+// ── File de messages (RabbitMQ) ─────────────────────────────────────────────
 builder.Services.Configure<MessageQueueOptions>(
     builder.Configuration.GetSection(MessageQueueOptions.Section));
 
-var commandeChannel = Channel.CreateBounded<CommandeMessage>(
-    new BoundedChannelOptions(1000) { FullMode = BoundedChannelFullMode.Wait });
-var expeditionChannel = Channel.CreateBounded<ExpeditionMessage>(
-    new BoundedChannelOptions(500) { FullMode = BoundedChannelFullMode.Wait });
-
-builder.Services.AddSingleton(commandeChannel);
-builder.Services.AddSingleton(expeditionChannel);
 builder.Services.AddHostedService<MqBackgroundService>();
 
 // ── JWT Authentication ───────────────────────────────────────────────────────
@@ -121,13 +114,15 @@ builder.Services.AddSwaggerGen(c =>
 // ── Build ────────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
+// Toujours activer Swagger pour la démonstration (même en prod)
+app.UseSwagger();
+app.UseSwaggerUI();
+
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseHttpsRedirection();
 }
 
-app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();

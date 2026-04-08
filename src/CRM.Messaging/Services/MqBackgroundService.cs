@@ -1,181 +1,186 @@
 using CRM.Domain.Interfaces.Services;
-using CRM.Domain.Models;
 using CRM.Messaging.Messages;
 using CRM.Messaging.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Threading.Channels;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using System.Text;
+using System.Text.Json;
 
 namespace CRM.Messaging.Services;
 
 /// <summary>
-/// BackgroundService "Always On" : écoute en continu la file de messages.
-/// Traite chaque CommandeMessage en appelant le pipeline complet :
-///   ContratValid → CreditControl → JitQuota → CreerFacture
-///
-/// Remplacez le Channel&lt;T&gt; in-memory par RabbitMQ/Azure Service Bus
-/// pour un environnement de production multi-serveurs.
+/// BackgroundService "Reactor Core" : Point d'entrée unique de l'EDI.
+/// Utilise RabbitMQ pour le découplage total et la robustesse JIT.
 /// </summary>
 public sealed class MqBackgroundService : BackgroundService
 {
-    private readonly Channel<CommandeMessage>     _commandeChannel;
-    private readonly Channel<ExpeditionMessage>   _expeditionChannel;
-    private readonly IContratValidationService     _validationService;
-    private readonly ICreditControlService         _creditService;
-    private readonly IJitQuotaService              _jitService;
-    private readonly IFacturationService           _facturationService;
-    private readonly MessageQueueOptions           _options;
-    private readonly ILogger<MqBackgroundService>  _logger;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly MessageQueueOptions _options;
+    private readonly ILogger<MqBackgroundService> _logger;
+
+    private IConnection? _connection;
+    private IChannel? _channel;
 
     public MqBackgroundService(
-        Channel<CommandeMessage> commandeChannel,
-        Channel<ExpeditionMessage> expeditionChannel,
-        IContratValidationService validationService,
-        ICreditControlService creditService,
-        IJitQuotaService jitService,
-        IFacturationService facturationService,
+        IServiceProvider serviceProvider,
         IOptions<MessageQueueOptions> options,
         ILogger<MqBackgroundService> logger)
     {
-        _commandeChannel    = commandeChannel;
-        _expeditionChannel  = expeditionChannel;
-        _validationService  = validationService;
-        _creditService      = creditService;
-        _jitService         = jitService;
-        _facturationService = facturationService;
-        _options            = options.Value;
-        _logger             = logger;
+        _serviceProvider = serviceProvider;
+        _options = options.Value;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("MqBackgroundService démarré — écoute de la file [{Queue}].", _options.QueueName);
+        _logger.LogInformation("MqBackgroundService démarré — Serveur: {Host}", _options.HostName);
 
-        // Traiter les deux channels en parallèle
-        var t1 = ProcessCommandesAsync(stoppingToken);
-        var t2 = ProcessExpeditionsAsync(stoppingToken);
-
-        await Task.WhenAll(t1, t2);
-
-        _logger.LogInformation("MqBackgroundService arrêté.");
-    }
-
-    // ── Commandes ────────────────────────────────────────────────────────────
-    private async Task ProcessCommandesAsync(CancellationToken ct)
-    {
-        await foreach (var msg in _commandeChannel.Reader.ReadAllAsync(ct))
+        while (!stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation(
-                "MQ ← COMMANDE reçue: Client={Client}, Contrat={Contrat}, Produit={Produit}, Qté={Qte}",
-                msg.NoClient, msg.NoContrat, msg.NoProduit, msg.Quantite);
-
-            int tentative = 0;
-            bool traite   = false;
-
-            while (!traite && tentative < _options.MaxRetries)
-            {
-                tentative++;
-                try
-                {
-                    await TraiterCommandeAsync(msg, ct);
-                    traite = true;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "MQ — Erreur tentative {T}/{Max} pour la commande {Client}/{Produit}.",
-                        tentative, _options.MaxRetries, msg.NoClient, msg.NoProduit);
-
-                    if (tentative < _options.MaxRetries)
-                        await Task.Delay(_options.RetryDelayMs, ct);
-                }
-            }
-
-            if (!traite)
-                _logger.LogCritical(
-                    "MQ — Message ABANDONNÉ après {Max} tentatives: {Client}/{Produit}.",
-                    _options.MaxRetries, msg.NoClient, msg.NoProduit);
-        }
-    }
-
-    private async Task TraiterCommandeAsync(CommandeMessage msg, CancellationToken ct)
-    {
-        // 1. ContratValid()
-        var validResult = await _validationService.ContratValidAsync(msg.NoClient, ct);
-        if (!validResult.IsValid)
-        {
-            _logger.LogWarning("MQ — ContratValid=FALSE: {Raison}", validResult.Raison);
-            return;
-        }
-
-        // 2. Contrôle de crédit
-        // (Le montant de la commande sera calculé dans usp_CreerFacture selon le prix contrat)
-        // On effectue une pré-vérification indicative ici.
-        var itemPrix = 0m; // Sera vérifié atomiquement par la SP
-        bool creditOk = await _creditService.CommandeAutoriseeAsync(msg.NoClient, itemPrix, ct);
-        if (!creditOk)
-        {
-            _logger.LogWarning("MQ — Commande BLOQUÉE par contrôle de crédit pour {Client}.", msg.NoClient);
-            return;
-        }
-
-        // 3. Quota JIT
-        bool quotaOk = await _jitService.QuotaRespecteeAsync(
-            msg.NoContrat, msg.NoProduit, msg.Quantite,
-            DateTime.UtcNow.Year, DateTime.UtcNow.Month, ct);
-
-        if (!quotaOk)
-        {
-            _logger.LogWarning(
-                "MQ — Commande BLOQUÉE par quota JIT: Contrat={Contrat}, Produit={Produit}.",
-                msg.NoContrat, msg.NoProduit);
-            return;
-        }
-
-        // 4. La facture sera créée sur signal d'expédition (ExpeditionMessage).
-        _logger.LogInformation(
-            "MQ — Commande ACCEPTÉE: Client={Client}, Contrat={Contrat}, Produit={Produit}, Qté={Qte}.",
-            msg.NoClient, msg.NoContrat, msg.NoProduit, msg.Quantite);
-    }
-
-    // ── Expéditions ───────────────────────────────────────────────────────────
-    private async Task ProcessExpeditionsAsync(CancellationToken ct)
-    {
-        await foreach (var msg in _expeditionChannel.Reader.ReadAllAsync(ct))
-        {
-            _logger.LogInformation(
-                "MQ ← EXPÉDITION reçue: Contrat={Contrat}, Produit={Produit}, Qté={Qte}",
-                msg.NoContrat, msg.NoProduit, msg.Quantite);
-
             try
             {
-                var p = new CreerFactureParams(
-                    msg.NoContrat, msg.NoProduit, msg.Quantite,
-                    msg.Reference, msg.NoUtilisateur,
-                    "Facture auto sur expédition");
+                await ConnectAsync(stoppingToken);
 
-                int noTx = await _facturationService.CreerFactureSurExpeditionAsync(p, ct);
+                var consumer = new AsyncEventingBasicConsumer(_channel!);
+                consumer.ReceivedAsync += OnMessageReceivedAsync;
 
-                _logger.LogInformation(
-                    "MQ — Facture #{NoTx} créée sur expédition pour Contrat={Contrat}.",
-                    noTx, msg.NoContrat);
+                await _channel!.BasicConsumeAsync(
+                    queue: _options.QueueName,
+                    autoAck: false,
+                    consumer: consumer,
+                    cancellationToken: stoppingToken);
+
+                _logger.LogInformation("MqBackgroundService — Écoute active sur [{Queue}].", _options.QueueName);
+
+                // Attendre indéfiniment (ou jusqu'à annulation)
+                await Task.Delay(-1, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex,
-                    "MQ — Erreur lors de la facturation sur expédition: Contrat={Contrat}.",
-                    msg.NoContrat);
+                _logger.LogError(ex, "MqBackgroundService — Rupture de connexion. Nouvelle tentative dans {Delay}ms...", _options.RetryDelayMs);
+                await Task.Delay(_options.RetryDelayMs, stoppingToken);
             }
+        }
+    }
+
+    private async Task ConnectAsync(CancellationToken ct)
+    {
+        var factory = new ConnectionFactory
+        {
+            HostName = _options.HostName,
+            UserName = _options.UserName,
+            Password = _options.Password
+        };
+
+
+        _connection = await factory.CreateConnectionAsync(ct);
+        _channel = await _connection.CreateChannelAsync(cancellationToken: ct);
+
+        // Déclaration des files (Durable = true pour la robustesse)
+        await _channel.QueueDeclareAsync(_options.QueueName, durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: ct);
+        await _channel.QueueDeclareAsync(_options.ResponseQueueName, durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: ct);
+
+        // Qualité de service : Traitement parallèle (10 messages max par service)
+        await _channel.BasicQosAsync(0, 10, false, ct);
+    }
+
+    private async Task OnMessageReceivedAsync(object sender, BasicDeliverEventArgs ea)
+    {
+        var body = ea.Body.ToArray();
+        var content = Encoding.UTF8.GetString(body);
+
+        try
+        {
+            var incoming = JsonSerializer.Deserialize<IncomingMqMessage>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (incoming == null)
+            {
+                await _channel!.BasicAckAsync(ea.DeliveryTag, false);
+                return;
+            }
+
+            // [TIMESTAMP] MQ_REC : Commande reçue pour {noClient}
+            _logger.LogInformation("MQ_REC : Commande reçue pour {NoClient}", incoming.NoClient ?? "Inconnu");
+
+            string status = "Rejected";
+
+            // Règle 5 : TestMessage handling
+            if (incoming.MessageType == "TestMessage")
+            {
+                status = "Approved";
+            }
+            else
+            {
+                // Règle d'acier 1 : Pas de logique ici, on appelle la DLL
+                using var scope = _serviceProvider.CreateScope();
+                var validationService = scope.ServiceProvider.GetRequiredService<IContratValidationService>();
+                var creditService = scope.ServiceProvider.GetRequiredService<ICreditControlService>();
+
+                try
+                {
+                    var vResult = await validationService.ContratValidAsync(incoming.NoClient ?? "", CancellationToken.None);
+                    
+                    // On vérifie le crédit basé sur le montant total reçu du message
+                    bool creditOk = await creditService.CommandeAutoriseeAsync(
+                        incoming.NoClient ?? "", 
+                        incoming.MontantTotal ?? 0m, 
+                        CancellationToken.None);
+
+                    if (vResult.IsValid && creditOk)
+                    {
+                        status = "Approved";
+                    }
+
+                    // [TIMESTAMP] SQL_CHECK : Validation via 172.16.88.120 - Résultat : {Statut}
+                    _logger.LogInformation("SQL_CHECK : Validation via 172.16.88.120 - Résultat : {Status}", status);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "SQL_CHECK : Erreur de connexion au serveur SQL 172.16.88.120.");
+                    // En cas d'erreur DB, on Nack avec requeue pour retry (Règle d'acier 3 - Logic)
+                    await _channel!.BasicNackAsync(ea.DeliveryTag, false, requeue: true);
+                    return;
+                }
+            }
+
+            // Règle 3 : Implémentation du "Répondre" (Publish)
+            var response = new EdiResponse(status, incoming.Reference);
+            var responseJson = JsonSerializer.Serialize(response);
+            var responseBody = Encoding.UTF8.GetBytes(responseJson);
+
+            await _channel!.BasicPublishAsync(
+                exchange: string.Empty,
+                routingKey: _options.ResponseQueueName,
+                mandatory: true,
+                basicProperties: new BasicProperties(),
+                body: responseBody);
+
+            // [TIMESTAMP] MQ_PUB : Réponse envoyée vers EDI
+            _logger.LogInformation("MQ_PUB : Réponse envoyée vers EDI");
+
+            await _channel!.BasicAckAsync(ea.DeliveryTag, false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erreur lors du traitement d'un message MQ.");
+            // Si erreur de format, on ignore pour ne pas bloquer la file indéfiniment
+            await _channel!.BasicAckAsync(ea.DeliveryTag, false);
         }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("MqBackgroundService — arrêt en cours...");
-        // Signaler la fin de l'écriture pour débloquer les ReadAllAsync
-        _commandeChannel.Writer.TryComplete();
-        _expeditionChannel.Writer.TryComplete();
+        _logger.LogInformation("MqBackgroundService — Arrêt en cours...");
+        if (_channel is not null) await _channel.CloseAsync(cancellationToken);
+        if (_connection is not null) await _connection.CloseAsync(cancellationToken);
         await base.StopAsync(cancellationToken);
     }
 }
+

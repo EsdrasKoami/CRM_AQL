@@ -36,39 +36,14 @@ public class TransactionRepository : ITransactionRepository
 
     public async Task<IEnumerable<SoldeClientDto>> GetSoldeClientAsync(string noClient, CancellationToken ct = default)
     {
-        var contrats = await _db.Contrats
-            .Include(c => c.Client)
-            .Where(c => c.NoClient == noClient && c.EstActif)
-            .ToListAsync(ct);
-
-        var result = new List<SoldeClientDto>();
-        foreach (var c in contrats)
-        {
-            var factures = await _db.Transactions
-                .Where(t => t.NoContrat == c.NoContrat && t.TypeTransaction == CRM.Domain.Enums.TypeTransaction.Facture)
-                .SumAsync(t => (decimal?)t.Montant, ct) ?? 0m;
-
-            var paiements = await _db.Transactions
-                .Where(t => t.NoContrat == c.NoContrat && t.TypeTransaction == CRM.Domain.Enums.TypeTransaction.Paiement)
-                .SumAsync(t => (decimal?)t.Montant, ct) ?? 0m;
-
-            result.Add(new SoldeClientDto
-            {
-                NoClient = noClient,
-                NomEntreprise = c.Client?.NomEntreprise ?? "",
-                NoContrat = c.NoContrat,
-                DateDebut = c.DateDebut,
-                DateFin = c.DateFin,
-                MontantMax = c.MontantMax,
-                TotalFactures = factures,
-                TotalPaiements = paiements,
-                SoldeContrat = factures - paiements,
-                CreditDisponible = c.MontantMax - (factures - paiements),
-                ContratActif = c.DateDebut <= DateTime.Today && c.DateFin >= DateTime.Today
-            });
-        }
-        return result;
+        using var conn = new SqlConnection(_connectionString);
+        // Utilisation de Dapper pour appeler la procédure stockée (Performance Maximale)
+        return await conn.QueryAsync<SoldeClientDto>(
+            "dbo.usp_GetSoldeClient",
+            new { NoClient = noClient },
+            commandType: System.Data.CommandType.StoredProcedure);
     }
+
 
     public async Task<int> CreerFactureAsync(CreerFactureParams p, CancellationToken ct = default)
     {

@@ -45,23 +45,7 @@ public class ContratsController : ControllerBase
         return contrat is null ? NotFound() : Ok(contrat);
     }
 
-    /// <summary>
-    /// Point central : ContratValid() — vérifie si un client a un contrat actif.
-    /// Appelé aussi par le BackgroundService MQ.
-    /// </summary>
-    [HttpGet("client/{noClient}/valide")]
-    [ProducesResponseType(typeof(object), 200)]
-    public async Task<IActionResult> ContratValid(string noClient, CancellationToken ct)
-    {
-        var result = await _validation.ContratValidAsync(noClient.ToUpper(), ct);
-        return Ok(new
-        {
-            noClient,
-            estValide  = result.IsValid,
-            noContrat  = result.NoContrat,
-            raison     = result.Raison
-        });
-    }
+
 
     /// <summary>Crée un nouveau contrat.</summary>
     [HttpPost]
