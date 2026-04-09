@@ -1,5 +1,9 @@
-namespace CRM.Messaging.Messages;
+using System.Data;
+using System.IO;
+using System.Text;
+using System.Text.Json;
 
+namespace CRM.Messaging.Messages;
 /// <summary>
 /// Structure du JSON entrant dans 'crm-commandes'.
 /// Contient soit une commande réelle, soit un signal de test.
@@ -30,4 +34,50 @@ public record ExpeditionMessage(
     int Quantite,
     string? Reference = null,
     int? NoUtilisateur = null);
+
+public class RMQEnveloppe
+{
+    private string _xmlData = string.Empty;
+
+    public RMQEnveloppe() { }
+
+    public RMQEnveloppe(string messageName, string sender, string messageText, string xmlData)
+    {
+        MessageName = messageName;
+        Sender = sender;
+        MessageText = messageText;
+        _xmlData = xmlData;
+    }
+
+    public string MessageName { get; set; } = string.Empty;
+    public string Sender { get; set; } = string.Empty;
+    public string MessageText { get; set; } = string.Empty;
+
+    public void SetData(DataSet? ds)
+    {
+        if (ds == null) { _xmlData = string.Empty; return; }
+        using var sw = new StringWriter();
+        ds.WriteXml(sw);
+        _xmlData = sw.ToString();
+    }
+
+    public DataSet GetData()
+    {
+        var ds = new DataSet();
+        if (!string.IsNullOrEmpty(_xmlData))
+        {
+            using var sr = new StringReader(_xmlData);
+            ds.ReadXml(sr);
+        }
+        return ds;
+    }
+
+    public string XmlData { get => _xmlData; set => _xmlData = value; }
+
+    public static RMQEnveloppe Deserialise(byte[] body)
+    {
+        var content = Encoding.UTF8.GetString(body);
+        return JsonSerializer.Deserialize<RMQEnveloppe>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new RMQEnveloppe();
+    }
+}
 

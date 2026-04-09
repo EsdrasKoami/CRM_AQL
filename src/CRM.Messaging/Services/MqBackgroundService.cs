@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using CRM.Domain.Interfaces.Services;
 using CRM.Messaging.Messages;
 using CRM.Messaging.Options;
@@ -95,82 +97,42 @@ public sealed class MqBackgroundService : BackgroundService
     private async Task OnMessageReceivedAsync(object sender, BasicDeliverEventArgs ea)
     {
         var body = ea.Body.ToArray();
-        var content = Encoding.UTF8.GetString(body);
 
         try
         {
-            var incoming = JsonSerializer.Deserialize<IncomingMqMessage>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (incoming == null)
+            RMQEnveloppe message = RMQEnveloppe.Deserialise(body);
+            var senderName = message.Sender;
+
+            var messageid = ea.BasicProperties.MessageId;
+            var timestamp = ea.BasicProperties.Timestamp;
+
+            string nowStr = DateTime.Now.ToString("yyyy-MM-dd HH'h'mm");
+            string logLineRec = $"{nowStr}::Reception::{message.MessageName}()\n";
+            await File.AppendAllTextAsync("mq_trace.log", logLineRec);
+
+            switch (message.MessageName)
             {
-                await _channel!.BasicAckAsync(ea.DeliveryTag, false);
-                return;
+                case "ChatMessage":
+                    Console.WriteLine($"Message de chat reçu de {senderName} : {message.MessageText}");
+                    break;
+
+                case "DataMessage":
+                    Console.WriteLine($"Message de données reçu de {senderName} : {message.MessageText}");
+                    break;
+
+                default:
+                    Console.WriteLine($"Message générique reçu de {senderName} : {message.MessageText}");
+                    break;
             }
 
-            // [TIMESTAMP] MQ_REC : Commande reçue pour {noClient}
-            _logger.LogInformation("MQ_REC : Commande reçue pour {NoClient}", incoming.NoClient ?? "Inconnu");
-
-            string status = "Rejected";
-
-            // Règle 5 : TestMessage handling
-            if (incoming.MessageType == "TestMessage")
-            {
-                status = "Approved";
-            }
-            else
-            {
-                // Règle d'acier 1 : Pas de logique ici, on appelle la DLL
-                using var scope = _serviceProvider.CreateScope();
-                var validationService = scope.ServiceProvider.GetRequiredService<IContratValidationService>();
-                var creditService = scope.ServiceProvider.GetRequiredService<ICreditControlService>();
-
-                try
-                {
-                    var vResult = await validationService.ContratValidAsync(incoming.NoClient ?? "", CancellationToken.None);
-                    
-                    // On vérifie le crédit basé sur le montant total reçu du message
-                    bool creditOk = await creditService.CommandeAutoriseeAsync(
-                        incoming.NoClient ?? "", 
-                        incoming.MontantTotal ?? 0m, 
-                        CancellationToken.None);
-
-                    if (vResult.IsValid && creditOk)
-                    {
-                        status = "Approved";
-                    }
-
-                    // [TIMESTAMP] SQL_CHECK : Validation via 172.16.88.120 - Résultat : {Statut}
-                    _logger.LogInformation("SQL_CHECK : Validation via 172.16.88.120 - Résultat : {Status}", status);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "SQL_CHECK : Erreur de connexion au serveur SQL 172.16.88.120.");
-                    // En cas d'erreur DB, on Nack avec requeue pour retry (Règle d'acier 3 - Logic)
-                    await _channel!.BasicNackAsync(ea.DeliveryTag, false, requeue: true);
-                    return;
-                }
-            }
-
-            // Règle 3 : Implémentation du "Répondre" (Publish)
-            var response = new EdiResponse(status, incoming.Reference);
-            var responseJson = JsonSerializer.Serialize(response);
-            var responseBody = Encoding.UTF8.GetBytes(responseJson);
-
-            await _channel!.BasicPublishAsync(
-                exchange: string.Empty,
-                routingKey: _options.ResponseQueueName,
-                mandatory: true,
-                basicProperties: new BasicProperties(),
-                body: responseBody);
-
-            // [TIMESTAMP] MQ_PUB : Réponse envoyée vers EDI
-            _logger.LogInformation("MQ_PUB : Réponse envoyée vers EDI");
+            string logLineEnv = $"{nowStr}::Envoie::{message.MessageName}()\n";
+            await File.AppendAllTextAsync("mq_trace.log", logLineEnv);
 
             await _channel!.BasicAckAsync(ea.DeliveryTag, false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erreur lors du traitement d'un message MQ.");
-            // Si erreur de format, on ignore pour ne pas bloquer la file indéfiniment
             await _channel!.BasicAckAsync(ea.DeliveryTag, false);
         }
     }

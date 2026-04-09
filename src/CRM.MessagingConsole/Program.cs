@@ -77,12 +77,15 @@ class Program
         Console.Write("Contenu du message : ");
         var contenu = Console.ReadLine() ?? "";
 
-        var message = new ConsoleMessage
+        Console.Write("Type de message (ex: ChatMessage, DataMessage, TestMessage) : ");
+        var typeMsg = Console.ReadLine() ?? "ChatMessage";
+
+        var message = new
         {
-            De = de,
-            A = queueName.Replace("-commandes", "").ToUpper(),
-            Contenu = contenu,
-            EnvoyeLe = DateTime.Now
+            MessageName = typeMsg,
+            Sender = de,
+            MessageText = contenu,
+            XmlData = string.Empty
         };
 
         try
