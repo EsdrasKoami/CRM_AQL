@@ -1,212 +1,116 @@
 using System;
-using System.Text;
-using System.Text.Json;
-using System.Threading;
+using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
-using RabbitMQ.Client;
+using RMQHelperDLL;
 using RabbitMQ.Client.Events;
+using CRM.DataAccess.Context;
 
 namespace CRM.MessagingConsole;
 
 class Program
 {
     const string HostName = "172.16.88.118";
-    
-    // Noms des files de destination
     const string QueueCrm = "crm-commandes";
-    const string QueueErp = "erp-commandes";
-    const string QueueEdr = "edr-commandes";
 
-    static async Task Main(string[] args)
+    static async Task Main()
     {
-        Console.WriteLine("=======================================");
-        Console.WriteLine("    CRM MESSAGING CONSOLE (RabbitMQ)   ");
-        Console.WriteLine($"    Serveur : {HostName}");
-        Console.WriteLine("=======================================\n");
-
-        while (true)
-        {
-            Console.WriteLine("Que voulez-vous faire ?");
-            Console.WriteLine("[1] ENVOYER un message");
-            Console.WriteLine("[2] ÉCOUTER une file (recevoir les messages)");
-            Console.WriteLine("[Q] Quitter");
-            Console.Write("\nChoix : ");
-            
-            var choix = Console.ReadLine()?.Trim().ToUpper();
-
-            if (choix == "Q") break;
-
-            if (choix == "1")
-            {
-                await EnvoyerMessageAsync();
-            }
-            else if (choix == "2")
-            {
-                await EcouterFileAsync();
-                // Une fois qu'on arrête d'écouter, on revient au menu principal
-            }
-            else
-            {
-                Console.WriteLine("Choix invalide.\n");
-            }
-        }
-    }
-
-    static async Task EnvoyerMessageAsync()
-    {
-        Console.WriteLine("\n--- ENVOI DE MESSAGE ---");
-        
-        Console.Write("De (votre identité, ex: CRM, ERP, EDR) : ");
-        var de = Console.ReadLine() ?? "Inconnu";
-
-        Console.WriteLine("À qui (destinataire) ?");
-        Console.WriteLine("  [1] CRM (" + QueueCrm + ")");
-        Console.WriteLine("  [2] ERP (" + QueueErp + ")");
-        Console.WriteLine("  [3] EDR (" + QueueEdr + ")");
-        Console.Write("Destinataire : ");
-        
-        var choixDest = Console.ReadLine();
-        string queueName = choixDest switch
-        {
-            "1" => QueueCrm,
-            "2" => QueueErp,
-            "3" => QueueEdr,
-            _ => QueueCrm // Défaut
-        };
-
-        Console.Write("Contenu du message : ");
-        var contenu = Console.ReadLine() ?? "";
-
-        Console.Write("Type de message (ex: ChatMessage, DataMessage, TestMessage) : ");
-        var typeMsg = Console.ReadLine() ?? "ChatMessage";
-
-        var message = new
-        {
-            MessageName = typeMsg,
-            Sender = de,
-            MessageText = contenu,
-            XmlData = string.Empty
-        };
+        Console.WriteLine("=== MODULE CRM - WORKER SERVICE (DEV) ===");
+        RMQConnectionHelper? rmq = null;
 
         try
         {
-            var factory = new ConnectionFactory { HostName = HostName, UserName = "guest", Password = "guest" };
-            using var connection = await factory.CreateConnectionAsync();
-            using var channel = await connection.CreateChannelAsync();
+            rmq = new RMQConnectionHelper($"amqp://guest:guest@{HostName}:5672/", QueueCrm);
+            await rmq.Connect();
+            Console.WriteLine($"[NET] Connecté. En écoute sur : {QueueCrm}");
 
-            // S'assurer que la file existe avant d'envoyer
-            await channel.QueueDeclareAsync(queue: queueName, durable: true, exclusive: false, autoDelete: false, arguments: null);
-
-            var messageJson = JsonSerializer.Serialize(message);
-            var body = Encoding.UTF8.GetBytes(messageJson);
-
-            await channel.BasicPublishAsync(
-                exchange: string.Empty,
-                routingKey: queueName,
-                mandatory: true,
-                basicProperties: new BasicProperties(),
-                body: body);
-
-            Console.WriteLine($"\n[SUCCÈS] Message envoyé à '{queueName}' ! \n");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"\n[ERREUR] Impossible d'envoyer : {ex.Message}\n");
-        }
-    }
-
-    static async Task EcouterFileAsync()
-    {
-        Console.WriteLine("\n--- ÉCOUTE DES MESSAGES ---");
-        Console.WriteLine("Quelle file voulez-vous écouter ?");
-        Console.WriteLine("  [1] CRM (" + QueueCrm + ")");
-        Console.WriteLine("  [2] ERP (" + QueueErp + ")");
-        Console.WriteLine("  [3] EDR (" + QueueEdr + ")");
-        Console.Write("File : ");
-        
-        var choixFile = Console.ReadLine();
-        string queueName = choixFile switch
-        {
-            "1" => QueueCrm,
-            "2" => QueueErp,
-            "3" => QueueEdr,
-            _ => QueueCrm
-        };
-
-        var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (s, e) =>
-        {
-            Console.WriteLine("\nArrêt de l'écoute...");
-            e.Cancel = true; // Empêche la fermeture de l'app complète
-            cts.Cancel();
-        };
-
-        try
-        {
-            var factory = new ConnectionFactory { HostName = HostName, UserName = "guest", Password = "guest" };
-            using var connection = await factory.CreateConnectionAsync();
-            using var channel = await connection.CreateChannelAsync();
-
-            await channel.QueueDeclareAsync(queue: queueName, durable: true, exclusive: false, autoDelete: false, arguments: null);
-
-            var consumer = new AsyncEventingBasicConsumer(channel);
-            consumer.ReceivedAsync += async (model, ea) =>
+            var consumer = new AsyncEventingBasicConsumer(rmq.CurrentChannel);
+            consumer.ReceivedAsync += async (_, ea) =>
             {
-                var body = ea.Body.ToArray();
-                var messageJson = Encoding.UTF8.GetString(body);
-                
+                var msg = RMQEnveloppe.Deserialise(ea.Body.ToArray());
+                Logger.Log("Reception", msg.MessageName);
+
                 try
                 {
-                    // Tente de désérialiser au format ConsoleMessage
-                    var msg = JsonSerializer.Deserialize<ConsoleMessage>(messageJson);
-                    if (msg != null && !string.IsNullOrEmpty(msg.Contenu))
+                    switch (msg.MessageName)
                     {
-                        Console.WriteLine($"\n--- NOUVEAU MESSAGE ({msg.EnvoyeLe:HH:mm:ss}) ---");
-                        Console.WriteLine($"De      : {msg.De}");
-                        Console.WriteLine($"Contenu : {msg.Contenu}");
-                        Console.WriteLine("------------------------------------------");
+                        case "TestMessage":
+                            Console.WriteLine("[MQ] Ping intercepté. Envoi RetourMessage...");
+                            var repPing = new RMQEnveloppe("RetourMessage", "CRM", "Actif", "");
+                            await rmq.SendAsync("edi-reponses", "RetourMessage", repPing.Serialize());
+                            Logger.Log("Envoie", "RetourMessage");
+                            break;
+
+                        case "Commande":
+                            Console.WriteLine($"[MQ] Commande EDI reçue : {msg.MessageText}");
+                            // Extraction basique (format attendu : Client:C000001|Produit:...)
+                            string noClient = msg.MessageText.Split('|')[0].Split(':')[1];
+                            
+                            // Connexion SQL JIT
+                            using (var context = new CrmDbContext())
+                            {
+                                bool clientExiste = context.Clients.Any(c => c.NoClient == noClient);
+                                string statut = clientExiste ? "Approuvé" : "Refusé";
+                                
+                                var repCmd = new RMQEnveloppe("ReponseCommande", "CRM", statut, "");
+                                await rmq.SendAsync("edi-reponses", "ReponseCommande", repCmd.Serialize());
+                                Logger.Log("Envoie", "ReponseCommande");
+                                Console.WriteLine($"[DB] Client {noClient} vérifié. Statut: {statut}");
+                            }
+                            break;
+
+                        default:
+                            Console.WriteLine($"[MQ] Ignoré : {msg.MessageName}");
+                            break;
                     }
-                    else 
-                    {
-                        // Si le json ne correspond pas à ConsoleMessage (ex: IncomingMqMessage du projet principal)
-                        AfficherMessageBrut(messageJson);
-                    }
+                    
+                    // MANUAL ACK - Seulement après le succès métier et du log
+                    await rmq.CurrentChannel.BasicAckAsync(ea.DeliveryTag, false);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // JSON invalide ou différent, on l'affiche tel quel
-                    AfficherMessageBrut(messageJson);
+                    Console.WriteLine($"[ERREUR TRAITEMENT] {ex.Message}");
+                    // Remise en queue optionnelle ou enregistrement erreur sans l'acquitter.
+                    await rmq.CurrentChannel.BasicNackAsync(ea.DeliveryTag, false, requeue: true);
                 }
-
-                await channel.BasicAckAsync(deliveryTag: ea.DeliveryTag, multiple: false);
             };
-
-            await channel.BasicConsumeAsync(queue: queueName, autoAck: false, consumer: consumer);
-
-            Console.WriteLine($"\n[EN ÉCOUTE] sur la file '{queueName}'. (Crtl+C retournera au menu)\n");
-
-            // Attendre jusqu'à l'annulation via Ctrl+C
-            try
-            {
-                await Task.Delay(-1, cts.Token);
-            }
-            catch (TaskCanceledException)
-            {
-                // Normal
-            }
+            // AUTOACK = FALSE
+            await rmq.CurrentChannel.BasicConsumeAsync(QueueCrm, false, "", false, false, null, consumer);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n[ERREUR] Impossible d'écouter : {ex.Message}\n");
+            Console.WriteLine($"[ERREUR] Réseau inaccessible. {ex.Message}");
         }
-        
-        Console.WriteLine();
-    }
 
-    static void AfficherMessageBrut(string contenu)
+        // SIMULATEUR D'INJECTION
+        while (true)
+        {
+            Console.WriteLine("\n[SIMULATEUR] 'test' (Ping du prof) | 'edi' (Fausse Commande) | 'quit'");
+            var choix = Console.ReadLine()?.Trim().ToLower();
+            if (choix == "quit") break;
+            
+            if (choix == "test" && rmq?.CurrentChannel != null)
+            {
+                var autoTest = new RMQEnveloppe("TestMessage", "CRM-Local", "Auto-Ping", "");
+                await rmq.SendAsync(QueueCrm, "TestMessage", autoTest.Serialize());
+            }
+            if (choix == "edi" && rmq?.CurrentChannel != null)
+            {
+                var fausseCmd = new RMQEnveloppe("Commande", "EDI-Simul", "Client:C000001|Montant:500", "");
+                await rmq.SendAsync(QueueCrm, "Commande", fausseCmd.Serialize());
+            }
+        }
+        if (rmq?.CurrentChannel != null) rmq.CurrentChannel.Dispose();
+    }
+}
+
+static class Logger
+{
+    public static void Log(string action, string nomMessage)
     {
-        Console.WriteLine($"\n--- MESSAGE BRUT REÇU ({DateTime.Now:HH:mm:ss}) ---");
-        Console.WriteLine(contenu);
-        Console.WriteLine("------------------------------------------");
+        Directory.CreateDirectory("logs");
+        string cheminLog = Path.Combine("logs", $"BE{DateTime.Now:yyyyMMdd}.log");
+        string ligne = $"{DateTime.Now:yyyy-MM-dd HH'h'mm}::{action}::{nomMessage}()";
+        File.AppendAllText(cheminLog, ligne + Environment.NewLine);
     }
 }
