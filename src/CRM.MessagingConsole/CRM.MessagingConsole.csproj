@@ -13,4 +13,14 @@
     <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="RMQHelperDLL">
+      <HintPath>..\..\MES\MES_App\bin\Debug\net8.0\RMQHelperDLL.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CRM.DataAccess\CRM.DataAccess.csproj" />
+  </ItemGroup>
+
 </Project>
