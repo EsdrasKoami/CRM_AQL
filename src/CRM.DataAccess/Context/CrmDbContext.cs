@@ -12,8 +12,8 @@ public class CrmDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            // IP DEV STRICTE avec Timeout court de 5 secondes
-            optionsBuilder.UseSqlServer("Server=172.16.88.118;Database=CRM_DB;User Id=sa;Password=TonPassword;TrustServerCertificate=True;Connect Timeout=5;");
+            // IP FINALE avec Timeout court de 5 secondes
+            optionsBuilder.UseSqlServer("Server=172.16.80.13;Database=CRM_DB;User Id=sa;Password=TonPassword;TrustServerCertificate=True;Connect Timeout=5;");
         }
     }
 
