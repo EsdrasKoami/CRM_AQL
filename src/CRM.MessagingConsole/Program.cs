@@ -62,65 +62,72 @@ class Program
                 };
 
                 _connection = await factory.CreateConnectionAsync();
-                _channel = await _connection.CreateChannelAsync();
+                _channel = await _connection.CreateChannelAsync(); // Channel principal pour l'envoi
 
-                // Déclarer les files nécessaires
-                await _channel.QueueDeclareAsync(queue: QueueReponse, durable: true, exclusive: false, autoDelete: false);
-                try { await _channel.QueueDeclareAsync(queue: QueueEcoute, durable: false, exclusive: false, autoDelete: false); }
-                catch { /* File déjà existante sur le serveur du prof */ }
-
-                Console.WriteLine($"[NET] Connecté. En écoute sur : {QueueEcoute}");
-                Console.WriteLine("[NET] En attente des messages du prof...\n");
-
-                var consumer = new AsyncEventingBasicConsumer(_channel);
-                consumer.ReceivedAsync += async (_, ea) =>
+                Console.WriteLine("[NET] Initialisation des écoutes multi-files...");
+                string[] queuesToListen = { "crm", "crm-commandes", "crm-command", "edi", "erp", "edi-reponses" };
+                
+                foreach (var queue in queuesToListen)
                 {
-                    var msg = RMQEnveloppe.Deserialise(ea.Body.ToArray());
+                    await AssureQueueAndSubscribeAsync(queue, _connection);
+                }
 
-                    Logger.Log("Reception", msg.MessageName);
-                    Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.WriteLine($"\n[MQ] REÇU : {msg.MessageName}");
-                    Console.WriteLine($"[MQ] Texte : {msg.MessageText}");
-                    Console.ResetColor();
+                Console.WriteLine("\n=============================================");
+                Console.WriteLine("           CLI INTERACTIF CRM AQL            ");
+                Console.WriteLine("=============================================");
 
-                    try
+                while (true)
+                {
+                    Console.WriteLine("\n[MENU] Choisissez la destination de votre message d'essai :");
+                    Console.WriteLine("  1. EDI (file: edi)");
+                    Console.WriteLine("  2. ERP (file: erp)");
+                    Console.WriteLine("  3. CRM (file: crm)");
+                    Console.WriteLine("  4. Autre (spécifier une file...)");
+                    Console.WriteLine("  0. Quitter l'application");
+                    Console.Write("Votre choix: ");
+                    
+                    var choix = Console.ReadLine();
+                    if (choix == "0") break;
+
+                    string targetQueue = choix switch
                     {
-                        switch (msg.MessageName)
-                        {
-                            case "TestMessage":
-                                Console.WriteLine("[MQ] Ping intercepté. Envoi RetourMessage...");
-                                var repPing = new RMQEnveloppe("RetourMessage", "CRM", "Actif", "");
-                                await SendAsync(QueueReponse, "RetourMessage", JsonSerializer.Serialize(repPing));
-                                Logger.Log("Envoie", "RetourMessage");
-                                break;
+                        "1" => "edi",
+                        "2" => "erp",
+                        "3" => "crm",
+                        "4" => "",
+                        _ => null
+                    };
 
-                            case "ContratValid":
-                                string noClient = msg.MessageText.Split('|')[0].Split(':')[1];
-                                var repCmd = new RMQEnveloppe("ReponseCommande", "CRM", "Approuvé", "");
-                                await SendAsync(QueueReponse, "ReponseCommande", JsonSerializer.Serialize(repCmd));
-                                Logger.Log("Envoie", "ReponseCommande");
-                                Console.WriteLine($"[MQ] Réponse envoyée -> Client: {noClient} | Statut: Approuvé");
-                                break;
-
-                            default:
-                                Console.WriteLine($"[MQ] Message reçu : {msg.MessageName} — aucun traitement défini.");
-                                break;
-                        }
-
-                        await _channel.BasicAckAsync(ea.DeliveryTag, false);
-                    }
-                    catch (Exception ex)
+                    if (targetQueue == null)
                     {
-                        Console.WriteLine($"[ERREUR TRAITEMENT] {ex.Message}");
-                        await _channel.BasicNackAsync(ea.DeliveryTag, false, requeue: true);
+                        Console.WriteLine("Choix invalide. Veuillez réessayer.");
+                        continue;
                     }
-                };
 
-                await _channel.BasicConsumeAsync(QueueEcoute, false, "", false, false, null, consumer);
+                    if (choix == "4")
+                    {
+                        Console.Write("Entrez le nom exact de la file cible: ");
+                        var q = Console.ReadLine();
+                        if (string.IsNullOrWhiteSpace(q)) continue;
+                        targetQueue = q;
+                    }
 
-                // Attendre indéfiniment (Ctrl+C pour quitter)
-                Console.WriteLine("[NET] Appuyez sur Ctrl+C pour arrêter.");
-                await Task.Delay(Timeout.Infinite);
+                    if (!string.IsNullOrWhiteSpace(targetQueue))
+                    {
+                        Console.Write("Nom du message (ex: TestMessage ou ContratValid) : ");
+                        var msgName = Console.ReadLine();
+                        if (string.IsNullOrWhiteSpace(msgName)) msgName = "TestMessage";
+                        
+                        Console.Write("Contenu texte du message d'essai : ");
+                        var msgText = Console.ReadLine() ?? "";
+
+                        var envelope = new RMQEnveloppe(msgName, "ConsoleTest", "Actif", msgText);
+                        string json = JsonSerializer.Serialize(envelope);
+                        
+                        await SendAsync(targetQueue, msgName, json);
+                        Logger.Log("EnvoiConsole", $"{targetQueue}_{msgName}");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -134,12 +141,70 @@ class Program
         if (_connection != null) await _connection.CloseAsync();
     }
 
+    static async Task AssureQueueAndSubscribeAsync(string qName, IConnection conn)
+    {
+        var channel = await conn.CreateChannelAsync();
+        try
+        {
+            // Essayer durable=false en premier car le prof utilise ça pour sa file "crm"
+            await channel.QueueDeclareAsync(queue: qName, durable: false, exclusive: false, autoDelete: false);
+        }
+        catch 
+        {
+            // Si RabbitMQ refuse (car la file existe déjà avec durable=true), le channel est fermé.
+            // On le ré-ouvre et on essaie durable=true.
+            try 
+            {
+                channel = await conn.CreateChannelAsync();
+                await channel.QueueDeclareAsync(queue: qName, durable: true, exclusive: false, autoDelete: false); 
+            }
+            catch 
+            { 
+                // Ignorer et essayer de consommer quand même
+            }
+        }
+
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += async (_, ea) =>
+        {
+            try
+            {
+                var rawBody = ea.Body.ToArray();
+                var rawText = Encoding.UTF8.GetString(rawBody);
+                
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"\n[MQ MSG BRUT REÇU sur '{qName}'] {rawText}");
+                Console.ResetColor();
+
+                var msg = RMQEnveloppe.Deserialise(rawBody);
+
+                Logger.Log($"Reception_{qName}", msg.MessageName);
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($"[MQ DÉCODÉ sur '{qName}'] | Type: {msg.MessageName} | Texte: {msg.MessageText}");
+                Console.ResetColor();
+
+                await channel.BasicAckAsync(ea.DeliveryTag, false);
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"[ERREUR TRAITEMENT sur '{qName}'] Décryptage impossible: {ex.Message}");
+                Console.ResetColor();
+                await channel.BasicNackAsync(ea.DeliveryTag, false, requeue: false);
+            }
+        };
+
+        await channel.BasicConsumeAsync(qName, false, "", false, false, null, consumer);
+        Console.WriteLine($"[NET] En écoute sur la file : {qName}");
+    }
+
     static async Task SendAsync(string queueName, string messageName, string jsonPayload)
     {
         if (_channel == null) return;
         var body = Encoding.UTF8.GetBytes(jsonPayload);
         await _channel.BasicPublishAsync(exchange: string.Empty, routingKey: queueName, mandatory: true, basicProperties: new BasicProperties(), body: body);
-        Console.WriteLine($"[NET] Réponse envoyée -> {queueName} ({messageName})");
+        Console.WriteLine($"\n[NET] => MESSAGE ENVOYÉ ! File: {queueName} | Message: {messageName}");
+        Console.WriteLine("---------------------------------------------");
     }
 }
 
