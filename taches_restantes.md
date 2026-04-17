@@ -15,8 +15,8 @@ Le moteur `MessagingConsole` et la communication RabbitMQ étant sécurisés, vo
 * **Mise au point SQL :**  Optimiser les requêtes Entity Framework pour que la nouvelle interface graphique charge les listes (ex: Liste des transactions) rapidement.
 
 ### 3. Emile (Logique Métier - BLL)
-**Mission : Interfaces de Communication Interne (API/Services)**
-* **Connecteurs Frontend/Backend :** Mettre en place des Contrôleurs (ou ViewModels dynamiques) permettant à l'Interface de communiquer facilement avec le `ContratValidationService`.
+**Mission : Intégration de la Logique aux Interfaces C#**
+* **Connecteurs Vue/Services :** Mettre en place les ViewModels ou classes passe-plats permettant à l'Interface Visuelle de communiquer directement avec le `ContratValidationService`.
 * **Règles d'Affichage :** Gérer la logique qui détermine si "Approuvé" ou "Refusé" doit apparaître en vert ou rouge sur l'Interface en fonction des quotas.
 
 ### 4. Lilia (Architecture JSON et Validations)
