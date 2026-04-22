@@ -1,10 +1,11 @@
 @echo off
-color 0B
-title Console Interactive CRM - Ecoute et Envoi RabbitMQ
+color 0A
+title Console SAGA CRM - Moteur Automatique
 echo ====================================================================
-echo   [SYSTEM] DEMARRAGE DE LA CONSOLE INTERACTIVE CRM
-echo   Grace a cette fenetre, tu vas pouvoir envoyer des messages
-echo   a EDI, ERP ou au Prof, et voir tout ce qu'on te repond !
+echo   [SYSTEM] DEMARRAGE DU MOTEUR CRM (SAGA ORCHESTRATOR)
+echo   Cette console prend en charge les exigences du scenario CR1.
+echo   Le CRM va reagir tout seul aux messages (ContratValid, Certificats)
+echo   et emettre les factures (810) sans aucune aide manuelle !
 echo ====================================================================
 echo.
 echo [SYSTEM] Recherche de ton projet CRM...

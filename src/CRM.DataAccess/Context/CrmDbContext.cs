@@ -12,13 +12,13 @@ public class CrmDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            // IP FINALE avec Timeout court de 5 secondes
-            optionsBuilder.UseSqlServer("Server=172.16.80.13;Database=CRM_DB;User Id=sa;Password=TonPassword;TrustServerCertificate=True;Connect Timeout=5;");
+            var connectionString = "Server=172.16.88.38;Port=3306;Database=CRM_DB;User=CRM_User;Password=Secret1234;";
+            optionsBuilder.UseMySql(connectionString, new MariaDbServerVersion(new Version(10, 6, 0)));
         }
     }
 
-    public DbSet<Client>      Clients      => Set<Client>();
-    public DbSet<Contrat>     Contrats     => Set<Contrat>();
+    public DbSet<Client> Clients => Set<Client>();
+    public DbSet<Contrat> Contrats => Set<Contrat>();
     public DbSet<ItemContrat> ItemsContrat => Set<ItemContrat>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Utilisateur> Utilisateurs => Set<Utilisateur>();
