@@ -11,7 +11,7 @@ namespace CRM.MessagingConsole;
 
 class Program
 {
-    const string HostName = "172.16.88.38"; // IP du serveur RabbitMQ
+    const string HostName = "172.16.88.227"; // IP du serveur RabbitMQ
     const string QueueEcoute = "crm";       // File du prof qu'on écoute
     const string QueueReponse = "edi-reponses"; // File où on envoie les réponses
 
