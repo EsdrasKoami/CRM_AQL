@@ -32,11 +32,11 @@ public class ContratValidationServiceTests
         var contrat = new Contrat
         {
             NoContrat = 1,
-            NoClient  = "C000001",
-            DateDebut  = DateTime.Today.AddDays(-30),
-            DateFin    = DateTime.Today.AddDays(30),
+            NoClient = "C000001",
+            DateDebut = DateTime.Today.AddDays(-30),
+            DateFin = DateTime.Today.AddDays(30),
             MontantMax = 50_000,
-            EstActif   = true
+            EstActif = true
         };
 
         _contratRepoMock
@@ -73,10 +73,10 @@ public class ContratValidationServiceTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(null!)]
-    public async Task ContratValid_NoClientVide_ReturnsFalse(string noClient)
+    public async Task ContratValid_NoClientVide_ReturnsFalse(string? noClient)
     {
         // Act
-        var result = await _service.ContratValidAsync(noClient);
+        var result = await _service.ContratValidAsync(noClient!);
 
         // Assert
         result.IsValid.Should().BeFalse();

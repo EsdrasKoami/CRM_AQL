@@ -40,7 +40,7 @@ public class ContratValidationServiceTests
         // Arrange
         var clientId = "C123456";
         _mockRepo.Setup(r => r.GetContratActifAsync(clientId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-                 .ReturnsAsync((Contrat)null);
+                 .ReturnsAsync((Contrat?)null);
 
         // Act
         var result = await _service.ContratValidAsync(clientId);

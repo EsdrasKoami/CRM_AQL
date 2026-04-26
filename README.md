@@ -1,71 +1,62 @@
-# CRM Manufacturier JIT — Guide d'équipe
+# 🚨 LE GUIDE DE SURVIE ABSOLU (À LIRE POUR LA PRÉSENTATION) 🚨
 
-Ce projet est un système CRM complet pour une entreprise manufacturière travaillant en flux tendu (Just In Time). Il comprend un Backend API sécurisé, une logique métier isolée et une interface client WPF.
-
-## 🏗️ Architecture du Projet
-
-Le projet suit une architecture en couches pour garantir l'isolation et la testabilité :
-
-- **CRM.Domain** : Contient les entités (Client, Contrat, etc.) et les interfaces.
-- **CRM.Business** : **Cœur du système**. Contient toute la logique de validation, calculs de solde et de quotas.
-- **CRM.DataAccess** : Gestion de la persistance (EF Core + Dapper) avec support **SQLite** (pour plus de portabilité).
-- **CRM.Logging** : Système de traçabilité quotidien (Logs BE).
-- **CRM.Messaging** : Gestionnaire de messages asynchrones (Background Service).
-- **CRM.Api** : Point d'entrée HTTP (ASP.NET Core) gérant l'authentification JWT.
-- **CRM.Frontend** : Application WPF déportée utilisant exclusivement l'API.
+Si vous ne comprenez rien au projet, lisez cette page. C'est écrit pour être compris par un enfant de 10 ans !
 
 ---
 
-## ✅ Respect des Exigences de Remise
+## 1. C'EST QUOI CE PROJET ? (L'EXPLICATION POUR UN ENFANT DE 10 ANS)
 
-Voici comment le projet répond aux critères demandés par le professeur :
+Imaginez une ville avec 3 maisons et 3 boîtes aux lettres magiques (RabbitMQ) :
+1. **La maison du Client (EDI)** : C'est celui qui veut acheter un jouet et qui paie.
+2. **L'Usine (ERP)** : C'est celui qui fabrique le jouet.
+3. **Le Chef d'Orchestre (VOTRE CRM)** : C'est vous ! Vous êtes au milieu. Le Client et l'Usine ne se parlent jamais directement, ils parlent tous les deux au CRM.
 
-### 1. Logique Métier (DLL & Public)
-La logique métier est regroupée dans le projet `CRM.Business`. C'est une **Class Library (.dll)** indépendante. Toutes les classes de services et interfaces nécessaires à l'intégration sont marquées comme `public`.
-
-### 2. Intégration EDI (ContratValid)
-L'exigence d'intégration avec l'EDI est respectée via `IContratValidationService`. 
-- **Méthode** : `ContratValidAsync(noClient)`
-- **Rôle** : Vérifie l'existence d'un contrat actif et retourne un objet de résultat structuré.
-
-### 3. Isolation de la Dette (Découplage WPF)
-La logique de calcul du solde (dette) est située dans `CRM.DataAccess` et consommée par `CRM.Business`. 
-**Le projet WPF est totalement isolé** : il ne contient aucune logique de calcul et aucune chaîne de connexion SQL. Il consomme les données via l'API, ce qui permet au prof de tester les DLL métier sans avoir besoin de l'interface graphique.
-
-### 4. Logger Quotidien (BEYYYYMMDD.log)
-Le système génère des logs automatiques dans le dossier `src/CRM.Api/logs/`.
-- **Format** : `BE{Date:yyyyMMdd}.log` (ex: `BE20260407.log`).
-- **Niveaux** : Trace les succès et les erreurs critiques avec source et horodatage.
+**L'histoire se passe toujours dans le même ordre :**
+* `ACTE 1` : Le Client (EDI) dépose une lettre `"Je veux un contrat (ContratValid)"` dans la boîte de votre CRM. 
+* `ACTE 2` : Votre CRM lit la lettre, dit OUI, et envoie un ordre de travail `"Céduler (Fabriquez !)"` à la boîte de l'Usine (ERP).
+* `ACTE 3` : L'Usine fabrique et envoie une preuve `"Le jouet est prêt (CertificatQualite)"` à votre CRM.
+* `ACTE 4` : Votre CRM envoie cette preuve (Certificat) ET la `Facture` au Client (EDI).
+* `ACTE 5` : Le Client paie (`Paiement`). Fin de l'histoire !
 
 ---
 
-## 🚀 Comment Lancer le Projet
+## 2. QUE FAIRE LE JOUR DE LA PRÉSENTATION ? (LA RECETTE SECRÈTE)
 
-### 1. Prérequis
-- Visual Studio 2022 avec .NET 8 SDK.
-- Support pour WPF et ASP.NET Core.
+Le jour J, vous lancez le fichier `run.bat`. L'écran s'ouvre sur un "Panneau de Contrôle Manuel".
+**À partir de là, peu importe ce que le prof décide de faire, vous êtes imbattables.** Voici les 3 cas possibles :
 
-### 2. Démarrage du Backend (Obligatoire en premier)
-1. Ouvrez la solution `Projet-AQL.sln`.
-2. Définissez `CRM.Api` comme projet de démarrage.
-3. Lancez (F5). Une fenêtre Swagger s'ouvrira pour confirmer que l'API tourne sur `http://localhost:5000`.
-   *(Note : La base de données SQLite `crm_local.db` se crée et s'initialise automatiquement au premier lancement).*
+### CAS N°1 : Le prof joue les méchants et dit *"Je vais envoyer moi-même un message dans votre CRM pour voir si ça marche !"*
+Ne paniquez pas, on a tout prévu !
+1. Laissez-le faire. Dès qu'il appuie sur son bouton de son ordinateur, votre écran noir va s'allumer avec un gros texte bleu : 
+   `🛎️ BINGO ! Le CRM vient de recevoir 'ContratValid' !`
+2. Pointez votre écran du doigt et dites : *"Regardez monsieur, la magie de RabbitMQ a opéré, nous avons bien intercepté votre demande."*
+3. Ensuite, regardez votre menu à l'écran. Il faut renvoyer la balle à l'Usine (l'ERP).
+   - Vous tapez le chiffre **`1`** sur votre clavier.
+   - Boom, votre CRM vient d'envoyer l'ordre `Céduler` vers l'ERP de manière sécurisée.
+4. L'écran confirmera en violet que la file ERP a bien reçu l'ordre. **Vous venez d'avoir un 20/20.**
 
-### 3. Démarrage du Frontend
-1. Une fois l'API lancée, faites un clic droit sur `CRM.Frontend` > `Debug` > `Start New Instance`.
-2. Connectez-vous avec les identifiants ci-dessous.
+### CAS N°2 : Le prof dit *"Montrez-moi juste une simulation complète de votre truc."* (Le prof ne tape rien)
+1. Vous tapez **`S`** (Pour Simuler une entrée).
+2. L'ordinateur va vous demander ce que vous voulez simuler. Vous tapez **`a`** (Simuler l'EDI qui envoie ContratValid).
+3. Le message fera croire au CRM qu'il a reçu une lettre.
+4. Vous reprenez la main : "Et maintenant, on répond en tapant **`1`** pour envoyer vers notre ERP !"
+5. Et vous continuez l'histoire.
+
+### CAS N°3 : Le prof essaie de vous piéger *"Prouvez-moi que votre console sait envoyer N'IMPORTE QUOI dans une file au choix !"*
+C'est le mode Tête Brûlée.
+1. Vous souriez et vous tapez **`4`** (Le mode Libre).
+2. L'ordinateur demande : *"Vers quelle file aller ?"* -> Vous écrivez `erp` (ou `edi`).
+3. L'ordinateur demande : *"Quel nom de message inventer ?"* -> Vous écrivez `TestDuProfesseur`.
+4. L'ordinateur propulse votre texte dans le vrai RabbitMQ du professeur. Il sera forcé de constater que votre outil marche parfaitement et que vous maîtrisez les flux de données.
 
 ---
 
-## 🔑 Identifiants de Test
+## RÉSUMÉ POUR VOS COLLÈGUES 
+- Vous n'avez pas de base de données à lancer, pas de code horrible à gérer le jour J.
+- Vous utilisez une "boîte de vitesse" manuelle (la console).
+- Si un message entre, il klaxonne (`BINGO !`).
+- Dès qu'il a klaxonné, vous choisissez la touche `1`, `2` ou `3` pour renvoyer la réponse correspondante. 
+- Touche `4` = Envoi magique et libre partout. 
+- Touche `S` = Créer de faux messages entrants si le prof est fatigué de taper.
 
-| Login | Password | Rôle |
-| :--- | :--- | :--- |
-| `Directeur1` | `Password123` | Accès complet (Plafonds + Soldes) |
-| `Agent1` | `Password123` | Accès limité (Navigation + Validation) |
-
----
-
-## 🛠️ Notes de Développement
-- **SQLite** : Nous avons migré de SQL LocalDB vers SQLite pour s'assurer que le projet fonctionne sur n'importe quel ordinateur sans configuration manuelle de SQL Server.
-- **Mode Reveal** : L'écran de connexion dispose d'une icône 👁️ pour voir le mot de passe tapé (synchronisation dynamique PasswordBox/TextBox).
+**Mettez-vous devant l'écran, lancez `run.bat` ensemble ce soir, et jouez avec les touches 1, 2, 3, 4 et S pour vous amuser. Vous allez tout comprendre en 2 minutes chrono.**
