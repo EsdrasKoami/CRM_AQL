@@ -22,6 +22,10 @@ class Program
     private const string RmqUser = "guest";
     private const string RmqPass = "guest";
 
+    // Configuration du rapport automatique au professeur
+    private const string LogQueue = "logs";
+    private const string EtudiantNom = "Esdra - CRM";
+
     private static IConnection? _connection;
     private static IChannel? _publishChannel;
 
@@ -153,6 +157,9 @@ class Program
                 WriteColor($"\n  [RÉCEPTION CRM] BINGO ! Le CRM vient de recevoir '{msg.MessageName}' de la part de {msg.Sender} !", ConsoleColor.Cyan);
                 WriteColor($"  >> CONTENU DU MESSAGE : {msg.MessageText}", ConsoleColor.DarkCyan);
 
+                // --- RAPPORT AUTOMATIQUE AU PROFESSEUR ---
+                await SendRemoteLogAsync($"Message '{msg.MessageName}' reçu de {msg.Sender}. Contenu: {msg.MessageText}");
+
                 // --- LOGIQUE DE LA SAGA CR1 ---
                 // Analyse automatique pour guider l'utilisateur durant la démo
                 if (msg.MessageName.Contains("Contrat", StringComparison.OrdinalIgnoreCase) || msg.MessageName == "850")
@@ -279,6 +286,17 @@ class Program
         var body = Encoding.UTF8.GetBytes(jsonPayload);
         await _publishChannel.BasicPublishAsync(exchange: string.Empty, routingKey: queueName, mandatory: true, basicProperties: new BasicProperties(), body: body);
         WriteColor($"\n  [ENVOI PAR LE CRM] Le message '{messageName}' est expédié vers la file '{queueName}' !", ConsoleColor.Yellow);
+    }
+
+    /// <summary>
+    /// Envoie un rapport de log à distance vers la file 'logs' pour visibilité du professeur.
+    /// </summary>
+    private static async Task SendRemoteLogAsync(string detail)
+    {
+        var logEntry = new RMQEnveloppe("LOG_RECEPTION", EtudiantNom, "Log", detail);
+        var json = JsonSerializer.Serialize(logEntry);
+        await PublishMessageAsync(LogQueue, "LOG_RECEPTION", json);
+        WriteColor($"  [REMOTE LOG] Rapport envoyé automatiquement vers la file '{LogQueue}'.", ConsoleColor.DarkYellow);
     }
 
     /// <summary>
