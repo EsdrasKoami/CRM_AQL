@@ -1,4 +1,4 @@
-# Industrial CRM & Manufacturing Orchestration Engine (Industry 4.0)
+# Industrial CRM & Manufacturing Orchestration Engine
 
 [![.NET 8.0](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/)
 [![C#](https://img.shields.io/badge/C%23-12.0-239120.svg)](https://learn.microsoft.com/dotnet/csharp/)
@@ -6,143 +6,143 @@
 [![Tests](https://img.shields.io/badge/Tests-7%20Passing-brightgreen.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Event--Driven%20%2F%20Saga-blueviolet.svg)]()
 
-> **Moteur middleware d'orchestration manufacturière Just-In-Time (JIT)** conçu pour l'interconnexion résiliente des systèmes **EDI**, **CRM**, **ERP** et **MES** (Manufacturing Execution System) dans une usine connectée (Industrie 4.0).
+> Moteur middleware d'orchestration manufacturière Just-In-Time (JIT) conçu pour l'interconnexion résiliente des systèmes EDI, CRM, ERP et MES (Manufacturing Execution System) au sein d'une usine connectée (Industrie 4.0).
 
 ---
 
-## 🎯 Problématique Industrielle & Métier
+## Problématique Industrielle et Métier
 
-Dans un environnement manufacturier moderne opérant en flux tendu (JIT), engager des machines-outils et des matières premières sans validation stricte expose l'usine à des coûts critiques :
-- **Commandes non solvables ou sans contrat valide.**
-- **Désynchronisation entre les commandes clients (EDI), l'ordonnancement d'atelier (ERP/MES) et la facturation.**
-- **Fragilité des architectures monolithiques synchrones** (un appel HTTP qui échoue bloque la ligne de fabrication).
+En environnement manufacturier opérant en flux tendu (JIT), mobiliser des matières premières et des lignes d'assemblage sans contrôle contractuel préalable engendre des coûts critiques :
+- Production engagée pour des clients insolvables ou aux contrats expirés.
+- Désynchronisation entre les commandes clients (EDI), l'ordonnancement d'atelier (ERP/MES) et la facturation.
+- Dépendances synchrones fragiles pouvant bloquer la chaîne de production en cas de panne réseau.
 
-Ce module CRM résout ces défis en agissant comme **orchestrateur d'affaires asynchrone** :
-1. **Évaluation de solvabilité temps réel :** Analyse contractuelle et vérification du plafond de crédit avant toute mise en fabrication.
-2. **Ordonnancement d'atelier (Saga) :** Déclenchement de la production (`Ceduler`) uniquement si l'ordre est conforme.
-3. **Contrôle Qualité & Clôture :** Réception du certificat de conformité usine (`CertificatQualite`) avant libération de la facture finale.
-4. **Résilience & Découplage :** Utilisation de RabbitMQ avec acquittements explicites (`ACK`/`NACK`) pour éliminer tout risque de perte d'ordre.
+Ce module CRM agit comme orchestrateur asynchrone pour sécuriser le flux :
+1. **Évaluation de solvabilité en temps réel :** Validation contractuelle et contrôle strict du plafond de crédit avant déclenchement d'usine.
+2. **Ordonnancement d'atelier (Saga) :** Émission de l'ordre de fabrication (`Ceduler`) uniquement si les conditions d'affaires sont réunies.
+3. **Contrôle Qualité et Clôture :** Réception du certificat de conformité usine (`CertificatQualite`) avant émission de la facture finale.
+4. **Découplage et Résilience :** Utilisation de files RabbitMQ avec acquittements explicites (`ACK`/`NACK`) pour éliminer tout risque de perte de message.
 
 ---
 
-## 🏗️ Architecture Globale & Flux d'Orchestration (Saga)
+## Architecture et Flux d'Orchestration
 
 ```mermaid
 flowchart TD
-    subgraph Partenaires_Clients [Partenaire Client / Logistique]
+    subgraph Partenaires_Clients [Partenaires Clients / Logistique]
         EDI[Portail EDI / Partenaires]
     end
 
     subgraph Middleware_CRM [Moteur CRM Industriel]
         CRM_Sub[Consommateur Asynchrone RabbitMQ]
-        Engine[Moteur de Règles & Validateur de Contrat]
-        DB[(CrmRepository / Base Métier)]
-        Spy[Mouchards Réseau & Observabilité]
+        Engine[Moteur de Règles et Contrôle Contrat]
+        DB[(CrmRepository / Référentiel Métier)]
+        Spy[Mouchards Réseau et Traçabilité]
     end
 
-    subgraph Plancher_Usine [Atelier de Fabrication & ERP]
+    subgraph Plancher_Usine [Atelier de Fabrication et ERP]
         ERP[ERP / Ordonnancement d'Usine]
-        MES[MES / Poste Qualité Atelier]
+        MES[MES / Contrôle Qualité Atelier]
     end
 
     subgraph Audit_Supervision [Supervision Industrielle]
-        Logs[(File Logs & Audit Trail)]
+        Logs[(File Logs / Audit Trail)]
     end
 
     EDI -->|1. Ordre de commande EDI 850 / ContratValid| CRM_Sub
     CRM_Sub --> Engine
-    Engine <-->|2. Vérification Crédit & Validité| DB
-    Engine -->|3. Ordre valide : Déclenchement 'Ceduler'| ERP
+    Engine <-->|2. Vérification Crédit et Validité| DB
+    Engine -->|3. Ordre validé : Émission 'Ceduler'| ERP
     ERP --> MES
     MES -->|4. Fin de production : 'CertificatQualite'| CRM_Sub
     Engine -->|5. Émission 'Facture' officielle| EDI
-    Engine -.->|Télémétrie & Audit distribué| Logs
+    Engine -.->|Télémétrie et Audit distribué| Logs
 ```
 
 ---
 
-## ✨ Fonctionnalités Clés & Compétences Développées
+## Fonctionnalités Clés et Architecture Logicielle
 
-* **Architecture Événementielle (EDA) :** Conception distribuée via RabbitMQ, canaux asynchrones non bloquants, queues dédiées et séparation stricte des responsabilités.
-* **Patron Saga Orchestré :** Gestion de transactions distribuées entre le CRM, l'ERP d'atelier et l'EDI client.
-* **Tolérance aux Pannes & Résilience :**
-  * Auto-reconnexion TCP préliminaire.
-  * Adaptation dynamique aux files durables/non-durables.
-  * Décodage résilient des enveloppes de données (fallback gracieux en cas de payload corrompu).
-* **Moteur de Règles Financières & Solvabilité :**
-  * Validation des dates d'effet du contrat.
-  * Vérification du plafond de crédit dynamique (`SoldeActuel < MontantMaxCredit`).
-  * Calcul comptable en temps réel des factures émises et des règlements perçus.
-* **Audit Trail & Observabilité :**
-  * Double journalisation horodatée (fichiers locaux structurés `/logs` et file RabbitMQ centralisée).
-  * Système de mouchards réseau en temps réel pour le diagnostic en atelier.
-* **Suite de Tests Automatisée :** 7 tests unitaires couvrant la logique contractuelle, la comptabilité et la robustesse de sérialisation.
+- **Architecture Orientée Événements (EDA) :** Conception asynchrone non-bloquante via RabbitMQ, canaux dédiés et découplage total des composants.
+- **Patron Saga Orchestré :** Coordination de transactions distribuées entre le CRM, l'ordonnancement d'atelier (ERP) et l'EDI client.
+- **Tolérance aux Pannes et Résilience :**
+  - Sonde TCP préliminaire validant la disponibilité du courtier.
+  - Gestion dynamique de la durabilité des files d'attente (durable / non-durable).
+  - Décodage résilient des enveloppes de données avec gestion des cas d'erreur sans interruption de service.
+- **Moteur de Règles Financières :**
+  - Contrôle d'échéance des contrats.
+  - Calcul dynamique de l'encours client (`SoldeActuel < MontantMaxCredit`).
+  - Réconciliation instantanée des factures et paiements reçus.
+- **Audit Trail et Observabilité :**
+  - Double journalisation horodatée (fichiers locaux structurés `/logs` et file RabbitMQ centralisée).
+  - Écoute active des canaux partenaires pour le diagnostic en temps réel.
+- **Couverture de Tests :** Suite de 7 tests unitaires automatisés validant la logique métier et la robustesse AMQP.
 
 ---
 
-## 📂 Structure du Répertoire
+## Structure du Répertoire
 
 ```text
 Projet-AQL/
-├── docs/                           # Documentation d'ingénierie détaillée
-│   ├── FunctionalSpecs.md          # Spécifications fonctionnelles et cas d'usage JIT
+├── docs/                           # Documentation d'ingénierie
+│   ├── FunctionalSpecs.md          # Spécifications fonctionnelles et règles JIT
 │   ├── TechnicalSpecs.md           # Spécifications d'infrastructure RabbitMQ & C#
-│   ├── RiskAnalysis.md             # Matrice des risques et plans d'atténuation
-│   └── TestPlan.md                 # Stratégie de tests unitaires, intégration et acceptation
+│   ├── RiskAnalysis.md             # Matrice des risques industriels et atténuation
+│   └── TestPlan.md                 # Stratégie de tests unitaires et d'intégration
 ├── src/
 │   ├── CRM.MessagingConsole/       # Service d'orchestration principal C# (.NET 8)
 │   │   ├── Data/
-│   │   │   └── CrmRepository.cs    # Moteur de données (Contrats, Transactions, Soldes)
+│   │   │   └── CrmRepository.cs    # Référentiel de données (Contrats, Transactions)
 │   │   ├── Models/
-│   │   │   └── RMQEnveloppe.cs     # Contrat de données standard inter-systèmes
-│   │   └── Program.cs              # Boucle d'événements, gestion AMQP et console de supervision
-│   └── CRM.Tests/                  # Suite de tests unitaires (MSTest / xUnit)
-│       └── CrmLogicTests.cs        # Tests de validation métier, sérialisation et solvabilité
+│   │   │   └── RMQEnveloppe.cs     # Contrat d'échange standard inter-systèmes
+│   │   └── Program.cs              # Boucle d'événements AMQP et console de supervision
+│   └── CRM.Tests/                  # Suite de tests automatisés (MSTest)
+│       └── CrmLogicTests.cs        # Tests de validation contractuelle et solvabilité
 ├── Documentation_Equipe_CRM.md     # Architecture détaillée et guide d'exploitation
-├── run.bat                         # Script d'exécution avec validation préalable des tests
+├── run.bat                         # Script d'exécution avec contrôle préalable des tests
 └── Projet-AQL.sln                  # Solution Visual Studio
 ```
 
 ---
 
-## 🚀 Démarrage Rapide
+## Démarrage Rapide
 
 ### Prérequis
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) ou supérieur.
-- Serveur RabbitMQ actif (accessible localement ou sur le réseau).
+- .NET 8.0 SDK ou supérieur.
+- Serveur RabbitMQ actif sur le réseau ou en local.
 
 ### 1. Exécution des Tests Unitaires
 ```bash
 dotnet test src/CRM.Tests/CRM.Tests.csproj --nologo
 ```
-*Sortie attendue : 7 tests réussis, 0 échec.*
+*Résultat : 7 tests réussis, 0 échec.*
 
-### 2. Lancement du Service CRM
+### 2. Lancement du Service
 Sous Windows :
 ```cmd
 run.bat
 ```
-Ou via la CLI .NET :
+Via la CLI .NET :
 ```bash
 dotnet run --project src/CRM.MessagingConsole/CRM.MessagingConsole.csproj
 ```
 
 ---
 
-## 🧪 Scénarios de Validation Métier (Démonstration)
+## Scénarios de Validation Métier
 
-La console propose un menu interactif ainsi qu'un simulateur intégré (touche **S**) pour reproduire les scénarios d'usine :
+La console propose un menu de navigation et un simulateur interactif (touche **S**) permettant de valider les scénarios industriels :
 
-| Touche | Scénario Industriel | Résultat Observé |
+| Commande | Scénario Industriel | Résultat Observé |
 | :---: | :--- | :--- |
-| **S -> a** | Commande client solvable (`C1`) | ✅ Contrat approuvé -> Recommandation d'envoyer l'ordre `Ceduler` à l'usine |
-| **S -> d** | Commande client avec plafond dépassé (`C2`) | ❌ Refus automatique immédiat -> Ordre `ContratRefuse` émis vers l'EDI |
-| **1** | Ordre de fabrication | 🏭 Message `Ceduler` transmis à la file `erp` |
-| **S -> b** | Réception fin de fabrication usine | 📋 Certificat qualité reçu -> Prêt pour facturation |
-| **3** | Facturation | 💵 Facture officielle transmise à l'EDI et transaction débitée au compte client |
-| **S -> c** | Réception d'un règlement | 💳 Paiement crédité et mise à jour automatique du solde client |
+| **S -> a** | Commande client solvable (`C1`) | Succès : Contrat validé, recommandation d'émission de l'ordre `Ceduler` |
+| **S -> d** | Commande avec plafond dépassé (`C2`) | Rejet immédiat : Notification `ContratRefuse` émise vers l'EDI |
+| **1** | Ordre de fabrication | Émission : Ordre `Ceduler` expédié vers la file `erp` |
+| **S -> b** | Réception fin de fabrication usine | Conformité : Certificat qualité reçu, déblocage de la facturation |
+| **3** | Facturation | Clôture : Facture officielle envoyée à l'EDI et compte client débité |
+| **S -> c** | Réception d'un règlement | Encaissement : Solde mis à jour automatiquement |
 
 ---
 
-## 👨‍💻 Développé par
-* **Esdra** – Ingénierie Logicielle & Intégration Industrielle (C# .NET / RabbitMQ / EDA)
+## Auteur
+* **Esdra** – Ingénierie Logicielle et Systèmes Industriels (C# .NET / RabbitMQ / EDA)
