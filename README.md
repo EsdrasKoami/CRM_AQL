@@ -145,4 +145,4 @@ La console propose un menu de navigation et un simulateur interactif (touche **S
 ---
 
 ## Auteur
-* **Esdra** – Ingénierie Logicielle et Systèmes Industriels (C# .NET / RabbitMQ / EDA)
+* **Esdras** – Ingénierie Logicielle et Systèmes Industriels (C# .NET / RabbitMQ / EDA)

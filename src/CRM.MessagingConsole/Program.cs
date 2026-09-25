@@ -25,7 +25,7 @@ class Program
 
     // Configuration de la traçabilité et de l'audit distribué
     private const string LogQueue = "logs";
-    private const string ServiceIdentifier = "Esdra - CRM"; // Identifiant du service d'orchestration CRM
+    private const string ServiceIdentifier = "Esdras - CRM"; // Identifiant du service d'orchestration CRM
 
     private static IConnection? _connection;
     private static IChannel? _publishChannel;
