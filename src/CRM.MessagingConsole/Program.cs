@@ -4,15 +4,16 @@ using System.Threading.Tasks;
 using System.Text.Json;
 using System.Text;
 using CRM.MessagingConsole.Models;
+using CRM.MessagingConsole.Data;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
 namespace CRM.MessagingConsole;
 
 /// <summary>
-/// Point d'entrée principal du module CRM.
-/// Cette console permet de piloter manuellement les échanges de messages RabbitMQ
-/// pour démontrer le fonctionnement de la Saga (workflow d'affaires) lors de l'évaluation académique.
+/// Point d'entrée principal du module d'orchestration CRM / Smart Factory.
+/// Cette console permet de piloter et superviser les échanges asynchrones RabbitMQ
+/// et d'orchestrer la Saga industrielle (Contrat -> Ordonnancement ERP -> Contrôle Qualité MES -> Facturation EDI).
 /// </summary>
 class Program
 {
@@ -22,12 +23,13 @@ class Program
     private const string RmqUser = "guest";
     private const string RmqPass = "guest";
 
-    // Configuration du rapport automatique au professeur
+    // Configuration de la traçabilité et de l'audit distribué
     private const string LogQueue = "logs";
-    private const string EtudiantNom = "Esdra - CRM";
+    private const string ServiceIdentifier = "Esdra - CRM"; // Identifiant du service d'orchestration CRM
 
     private static IConnection? _connection;
     private static IChannel? _publishChannel;
+    private static readonly CrmRepository _repo = new();
 
     /// <summary>
     /// Initialisation de l'application et gestion du cycle de vie des connexions.
@@ -35,7 +37,7 @@ class Program
     static async Task Main()
     {
         Console.WriteLine("======================================================");
-        Console.WriteLine(" MODULE CRM - PANNEAU DE CONTRÔLE MANUEL INTÉGRAL     ");
+        Console.WriteLine(" MODULE CRM INDUSTRIEL - CONSOLE D'ORCHESTRATION JIT  ");
         Console.WriteLine("======================================================\n");
 
         // Vérification préliminaire de la connectivité réseau vers RabbitMQ
@@ -66,25 +68,25 @@ class Program
     }
 
     /// <summary>
-    /// Boucle de navigation principale permettant d'envoyer des messages ou simuler des réceptions.
+    /// Boucle de navigation principale permettant de piloter le workflow ou simuler des flux partenaires.
     /// </summary>
     private static async Task RunDashboardAsync()
     {
-        Console.WriteLine("\n[ SYSTÈME PRÊT ET EN ÉCOUTE CONTINUE ]");
-        Console.WriteLine("Si le prof envoie un message dans 'crm', il apparaîtra ici instantanément.");
+        Console.WriteLine("\n[ SYSTÈME D'ORCHESTRATION PRÊT - ÉCOUTE ACTIVE DES FILES ]");
+        Console.WriteLine("Les flux partenaires entrants (EDI / ERP / MES) sont analysés et traités en temps réel.");
 
         while (true)
         {
             Console.WriteLine("\n--------------------------------------------------------------");
-            Console.WriteLine(" VOS ACTIONS (Tapez la Tonalité et appuyez sur Entrée) :     ");
+            Console.WriteLine(" WORKFLOW INDUSTRIEL & SUPERVISION CRM                       ");
             Console.WriteLine("--------------------------------------------------------------");
-            Console.WriteLine(" >> POUR RÉPONDRE / ENVOYER (Si vous recevez qqch) : ");
-            Console.WriteLine("  1. Envoyer l'ordre 'Ceduler' vers l'ERP");
-            Console.WriteLine("  2. Envoyer le 'CertificatQualite' vers l'EDI");
-            Console.WriteLine("  3. Envoyer la 'Facture' vers l'EDI");
-            Console.WriteLine("  4. Envoi Libre : Choisir soi-même le nom ET la destination");
-            Console.WriteLine("\n >> POUR SIMULER VOUS-MÊME (Si le prof ne fait rien) : ");
-            Console.WriteLine("  S. Simuler une Réception entrante (EDI/ERP -> CRM)");
+            Console.WriteLine(" >> PILOTAGE DE LA SAGA INDUSTRIELLE : ");
+            Console.WriteLine("  1. Déclencher l'ordre de fabrication 'Ceduler' vers l'ERP (Usine)");
+            Console.WriteLine("  2. Transmettre le 'CertificatQualite' validé vers l'EDI");
+            Console.WriteLine("  3. Émettre la 'Facture' officielle vers l'EDI");
+            Console.WriteLine("  4. Émission libre : Spécifier la file cible et le message");
+            Console.WriteLine("\n >> SIMULATION DE FLUX ENTRANTS (Tests d'intégration) : ");
+            Console.WriteLine("  S. Simuler un événement entrant (EDI / ERP -> CRM)");
             Console.WriteLine("--------------------------------------------------------------");
             Console.Write("Votre Choix : ");
 
@@ -105,6 +107,7 @@ class Program
             {
                 var envelope = new RMQEnveloppe("Facture", "CRM", "Actif", "Facture officielle de 500$");
                 await PublishMessageAsync("edi", "Facture", JsonSerializer.Serialize(envelope));
+                _repo.EnregistrerTransaction("C1", 500m, "Facture");
             }
             else if (choix == "4") // Mode expert pour tout type de message
             {
@@ -125,12 +128,14 @@ class Program
                 Console.WriteLine("   a) L'EDI envoie 'ContratValid'");
                 Console.WriteLine("   b) L'ERP envoie 'CertificatQualite'");
                 Console.WriteLine("   c) L'EDI envoie 'Paiement'");
-                Console.Write(" > (a/b/c) : ");
+                Console.WriteLine("   d) L'EDI envoie 'ContratValid' (Client Insolvable)");
+                Console.Write(" > (a/b/c/d) : ");
                 var subChoix = Console.ReadLine()?.Trim().ToLower();
 
-                if (subChoix == "a") await PublishMessageAsync("crm", "ContratValid", JsonSerializer.Serialize(new RMQEnveloppe("ContratValid", "EDI_Virtuel", "Actif", "Demande simulée")));
+                if (subChoix == "a") await PublishMessageAsync("crm", "ContratValid", JsonSerializer.Serialize(new RMQEnveloppe("ContratValid", "C1", "Actif", "Demande simulée")));
                 if (subChoix == "b") await PublishMessageAsync("crm", "CertificatQualite", JsonSerializer.Serialize(new RMQEnveloppe("CertificatQualite", "ERP_Virtuel", "Actif", "Certificat simulé")));
-                if (subChoix == "c") await PublishMessageAsync("crm", "Paiement", JsonSerializer.Serialize(new RMQEnveloppe("Paiement", "EDI_Virtuel", "Actif", "Paiement simulé")));
+                if (subChoix == "c") await PublishMessageAsync("crm", "Paiement", JsonSerializer.Serialize(new RMQEnveloppe("Paiement", "C1", "Actif", "Paiement simulé")));
+                if (subChoix == "d") await PublishMessageAsync("crm", "ContratValid", JsonSerializer.Serialize(new RMQEnveloppe("ContratValid", "C2", "Actif", "Demande d'un client sans crédit")));
             }
 
             await Task.Delay(500); // Petite pause pour la fluidité d'affichage console
@@ -154,33 +159,36 @@ class Program
             // Scénario : Le CRM reçoit un message (Destination finale ou étape de Saga)
             if (queueName.StartsWith("crm"))
             {
-                WriteColor($"\n  [RÉCEPTION CRM] BINGO ! Le CRM vient de recevoir '{msg.MessageName}' de la part de {msg.Sender} !", ConsoleColor.Cyan);
-                WriteColor($"  >> CONTENU DU MESSAGE : {msg.MessageText}", ConsoleColor.DarkCyan);
+                WriteColor($"\n  [RÉCEPTION CRM] Événement reçu : '{msg.MessageName}' émis par [{msg.Sender}]", ConsoleColor.Cyan);
+                WriteColor($"  >> CHARGE UTILE : {msg.MessageText}", ConsoleColor.DarkCyan);
 
-                // --- RAPPORT AUTOMATIQUE AU PROFESSEUR ---
+                // --- AUDIT TRAIL DISTANT / SUPERVISION CENTRALISÉE ---
                 await SendRemoteLogAsync($"Message '{msg.MessageName}' reçu de {msg.Sender}. Contenu: {msg.MessageText}");
 
-                // --- LOGIQUE DE LA SAGA CR1 ---
-                // Analyse automatique pour guider l'utilisateur durant la démo
+                // --- LOGIQUE D'ORCHESTRATION DE LA SAGA INDUSTRIELLE ---
                 if (msg.MessageName.Contains("Contrat", StringComparison.OrdinalIgnoreCase) || msg.MessageName == "850")
                 {
-                    WriteColor($"  >> [RÈGLE D'AFFAIRES] Le CRM analyse le contrat en base de données...", ConsoleColor.DarkGray);
+                    WriteColor($"  >> [RÈGLE D'AFFAIRES] Le CRM interroge la base de données pour le client : {msg.Sender}...", ConsoleColor.DarkGray);
+                    
+                    var contrat = _repo.GetContratByClient(msg.Sender);
 
-                    // Détection des messages d'erreur ou d'invalidité
-                    bool isInvalide = msg.MessageText.Contains("invalide", StringComparison.OrdinalIgnoreCase) ||
-                                      msg.MessageText.Contains("refus", StringComparison.OrdinalIgnoreCase) ||
-                                      msg.MessageName.Contains("Invalide", StringComparison.OrdinalIgnoreCase);
-
-                    if (isInvalide)
+                    if (contrat == null || !contrat.EstValide)
                     {
-                        WriteColor($"  >> [RÉSULTAT SAGA] Le contrat du client est INTROUVABLE ou EXPIRÉ !", ConsoleColor.Red);
-                        WriteColor($"  => [CONSEIL] Refusez l'ordre. Tapez '4', envoyez vers 'edi', nom du message 'ContratRefuse'.", ConsoleColor.Red);
+                        string raison = contrat == null ? "Client inconnu" : "Crédit insuffisant ou dates expirées";
+                        WriteColor($"  >> [RÉSULTAT SAGA] REJET : Le contrat est invalide ({raison}) !", ConsoleColor.Red);
+                        WriteColor($"  => [CONSEIL] Refusez l'ordre. Tapez '4', envoyez vers 'edi', nom 'ContratRefuse'.", ConsoleColor.Red);
                     }
                     else
                     {
-                        WriteColor($"  >> [RÉSULTAT SAGA] Le contrat du client est VALIDE ! Le solde est suffisant.", ConsoleColor.Green);
+                        WriteColor($"  >> [RÉSULTAT SAGA] SUCCÈS : Contrat valide jusqu'au {contrat.DateFin:dd/MM/yyyy}. Solde OK.", ConsoleColor.Green);
                         WriteColor($"  => [CONSEIL] Vous pouvez lancer l'Usine. Tapez la touche '1' pour envoyer 'Ceduler' à l'ERP.", ConsoleColor.Green);
                     }
+                }
+                else if (msg.MessageName.Contains("Paiement", StringComparison.OrdinalIgnoreCase))
+                {
+                    _repo.EnregistrerTransaction(msg.Sender, 500m, "Paiement");
+                    var solde = _repo.GetSoldeClient(msg.Sender);
+                    WriteColor($"  >> [FINANCE] Paiement de 500$ reçu de {msg.Sender}. Nouveau solde : {solde}$", ConsoleColor.Green);
                 }
                 else if (msg.MessageName.Contains("Certificat", StringComparison.OrdinalIgnoreCase) || msg.MessageName == "855")
                 {
@@ -289,14 +297,14 @@ class Program
     }
 
     /// <summary>
-    /// Envoie un rapport de log à distance vers la file 'logs' pour visibilité du professeur.
+    /// Envoie un rapport d'audit à distance vers la file 'logs' pour traçabilité et monitoring distribué.
     /// </summary>
     private static async Task SendRemoteLogAsync(string detail)
     {
-        var logEntry = new RMQEnveloppe("LOG_RECEPTION", EtudiantNom, "Log", detail);
+        var logEntry = new RMQEnveloppe("LOG_RECEPTION", ServiceIdentifier, "Log", detail);
         var json = JsonSerializer.Serialize(logEntry);
         await PublishMessageAsync(LogQueue, "LOG_RECEPTION", json);
-        WriteColor($"  [REMOTE LOG] Rapport envoyé automatiquement vers la file '{LogQueue}'.", ConsoleColor.DarkYellow);
+        WriteColor($"  [AUDIT DISTANT] Télémétrie d'audit expédiée vers la file centralisée '{LogQueue}'.", ConsoleColor.DarkYellow);
     }
 
     /// <summary>
